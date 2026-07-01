@@ -402,7 +402,7 @@ with st.expander("📡 Current Signals", expanded=True):
     st.markdown("**Current sleeve signals**")
     for t in CURRENT_RISK:
         on = sig_state.get(t, False)
-        st.markdown(f"{'🟢' if on else '⚪'} `{t}` — {'**ON**' if on else 'off'}")
+        st.markdown(f"{'🟢' if on else '⚪'} `{t}` - {'**ON**' if on else 'off'}")
 
     st.markdown("**Target weights**")
     active = w_unl[w_unl > 1e-6].sort_values(ascending=False)
@@ -414,7 +414,12 @@ with st.expander("📡 Current Signals", expanded=True):
 st.divider()
 st.subheader("Your Holdings")
 
-needed = sorted(w_unl[w_unl > 1e-6].index.tolist())
+# Include ALL strategy tickers so users can enter holdings for OFF-signal
+# positions (which have target=0) and receive SELL orders for them.
+all_strategy_tickers = list(set(
+    CURRENT_RISK + [CURRENT_CASH] + EURO_UNIVERSE + [EURO_CASH, BOND_TICKER]
+))
+needed = sorted(set(w_unl[w_unl > 1e-6].index.tolist()) | set(all_strategy_tickers))
 
 with st.form("holdings_form"):
     total_value = st.number_input(
@@ -454,6 +459,11 @@ if submitted:
 
     targets = {t: float(w_unl.get(t, 0.0)) * total_value for t in needed}
     diffs   = {t: targets[t] - current_values.get(t, 0.0) for t in needed}
+
+    # Fetch live prices for any extra tickers needed for share conversion
+    if mode == "Shares" and any(t not in live_px for t in needed):
+        extra = [t for t in needed if t not in live_px]
+        live_px.update(_latest_prices(extra))
 
     buys  = [(t, diffs[t]) for t in needed if diffs[t] >= min_trade]
     sells = [(t, diffs[t]) for t in needed if diffs[t] <= -min_trade]
@@ -520,11 +530,14 @@ else:
         label = "BUY ZONE — add to position" if above else "BELOW MA — hold cash (EUN6.DE)"
 
         with st.container(border=True):
-            st.markdown(f"{color} **{ticker}** — {info['name']}")
+            st.markdown(f"{color} **{ticker}** - {info['name']}")
             c1, c2, c3 = st.columns(3)
             c1.metric("Price", f"{info['price']:.2f}", help=f"As of {info['as_of']}")
             c2.metric("200d MA", f"{info['ma200']:.2f}")
             c3.metric("vs MA", f"{sign}{info['pct']:.1f}%", delta_color="normal" if above else "inverse")
-            st.info(label) if above else st.warning(label)
+            if above:
+                st.info(label)
+            else:
+                st.warning(label)
 
 st.caption("Prices cached 1 hour. Refresh the page to force an update.")
